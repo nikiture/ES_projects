@@ -10,12 +10,20 @@
 #include "timer.h"
 
 void __attribute__((__interrupt__, __auto_pav__)) _T2Interrupt () {
+    //tmr_wait_ms(TIMER2, 50);
     IFS0bits.T2IF = 0;
-    LATGbits.LATG9 = !LATGbits.LATG9;    
+    IEC0bits.T2IE = 0;
+    if (PORTEbits.RE8 == 1) { //if the button is not pressed toggle LED   
+        LATGbits.LATG9 = !LATGbits.LATG9;
+    }
+    /**/
 }
 void __attribute__((__interrupt__, __auto_pav__)) _INT1Interrupt () {
     IFS1bits.INT1IF = 0;
-    LATGbits.LATG9 = !LATGbits.LATG9;    
+    IFS0bits.T2IF = 0;
+    IEC0bits.T2IE = 1;
+    tmr_setup_period(TIMER2, 10);
+    //LATGbits.LATG9 = !LATGbits.LATG9;    
 } 
 
 int main(void) {
@@ -24,19 +32,17 @@ int main(void) {
     TRISGbits.TRISG9 = 0;
     TRISEbits.TRISE8 = 1;//set port to input
     tmr_setup_period (TIMER1, 200); //set period to 200 ms
+    /*
     tmr_setup_period (TIMER2, 100); //set period to 100 ms
-    //enable interrupt on TIMER 2
+    //enable/disable interrupt on TIMER 2
     IEC0bits.T2IE = 0;
+    */
     //map INT1 to pin RE8
     RPINR0bits.INT1R = 0x58; //map interrupt INT1 to RPI88 (pin of button T2)
     INTCON2bits.GIE = 1;
     IFS1bits.INT1IF = 0;
     IEC1bits.INT1IE = 1;
-    
-    
-    
-    
-    
+   
     while (1) {
         /*part1*/
         /*
