@@ -12,7 +12,8 @@
 #define ubrg_value ((72000000 / 16) / baud_rate) - 1
 //char rec;
 
-
+/*part 1*/
+#if 0
 void __attribute__ ((__interrupt__, __auto_psv__)) _U1RXInterrupt() {
         //IFS0bits.U1RXIF = 0;/**/
         
@@ -83,3 +84,22 @@ int main(void) {
     }
     return 0;
 }
+#elif 1
+/*part 2*/
+void algorithm() {
+    tmr wait ms(TIMER2, 7);
+}
+int main() {
+    tmr setup period(TIMER1, 10);
+    while(1) {
+        algorithm();
+        // code to handle the assignment
+        
+        
+        
+        
+        
+        ret = tmr wait period(TIMER1);
+    }
+}
+
