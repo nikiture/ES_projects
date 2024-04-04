@@ -136,6 +136,10 @@ void __attribute__ ((__interrupt__, __auto_psv__)) _T3Interrupt () {
 }
 int idx = 0;
 char val_msg [2] = "LD";
+//possible additions:
+//- 3-char read with flush of excess in buffer
+//- more than 4 - char transmission on button press
+//- circular buffer write and read
 void __attribute__ ((__interrupt__, __auto_psv__)) _U1RXInterrupt() {
     /*for (int i = 0; i < 3; i++) {
         msg [i] = U1RXREG; //store each of the 3 chars on the buffer in a string 
