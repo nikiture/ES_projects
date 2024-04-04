@@ -6,6 +6,8 @@
  */
 
 
+#include <p33EP512MU810.h>
+
 #include "xc.h"
 #include "timer.h"
 #define baud_rate 9600
@@ -132,12 +134,26 @@ void __attribute__ ((__interrupt__, __auto_psv__)) _T3Interrupt () {
     }
     IFS0bits.T3IF = 0;
 }
+int idx = 0;
+char val_msg [2] = "LD";
 void __attribute__ ((__interrupt__, __auto_psv__)) _U1RXInterrupt() {
-    for (int i = 0; i < 3; i++) {
+    /*for (int i = 0; i < 3; i++) {
         msg [i] = U1RXREG; //store each of the 3 chars on the buffer in a string 
     }
     char_read += 3;
-    value_rec = 1; //"flag" the main function that input from the Uart has been received
+    value_rec = 1;*/
+    msg [idx] = U1RXREG;
+    if (idx <= 1 && msg [idx] == val_msg [idx]) {//check if value currently received corresponds to
+        //the character of a valid string, if so continue forming the string
+        idx ++;      
+    } else { //3 characters stored or invalid string formed
+        if (idx > 1) {//3 characters read, the first two are valid
+            value_rec = 1; //"flag" the main function that input from the Uart has been received
+        }
+        idx = 0; //restart string formation from the beginning
+    }
+    char_read ++;
+    
     IFS0bits.U1RXIF = 0;
 }
 void algorithm() {
@@ -175,7 +191,7 @@ int main() {
     //enable tx on uart1
     U1STAbits.UTXEN = 1;
     //set the flag for reception
-    U1STAbits.URXISEL = 0b10; //flag raised when 3 characters are read
+    U1STAbits.URXISEL = 0b00; //flag raised when 3 characters are read
     
     RPINR1bits.INT2R = 0x58; //map interrupt INT2 to RPI88 (pin of button T2)
     IFS1bits.INT2IF = 0;
