@@ -88,7 +88,7 @@ int main(void) {
 }
 #elif 1
 /*part 2*/
-char msg [3];
+char msg [16];
 int value_rec = 0; // "flag" for Uart char reception
 int LD_toggle = 1;//variable for enabling of LED2 blinking
 int button, button_press = 0; //"flags" for buttons pressed
@@ -135,10 +135,13 @@ void __attribute__ ((__interrupt__, __auto_psv__)) _T3Interrupt () {
     IFS0bits.T3IF = 0;
 }
 int idx = 0;
+int w_idx = 0; 
+int r_idx = 0;
 char val_msg [2] = "LD";
+char check_msg [2];
+char trash;
 //possible additions:
 //- 3-char read with flush of excess in buffer
-//- more than 4 - char transmission on button press
 //- circular buffer write and read
 void __attribute__ ((__interrupt__, __auto_psv__)) _U1RXInterrupt() {
     /*for (int i = 0; i < 3; i++) {
@@ -146,7 +149,7 @@ void __attribute__ ((__interrupt__, __auto_psv__)) _U1RXInterrupt() {
     }
     char_read += 3;
     value_rec = 1;*/
-    msg [idx] = U1RXREG;
+    /*msg [idx] = U1RXREG;
     if (idx <= 1 && msg [idx] == val_msg [idx]) {//check if value currently received corresponds to
         //the character of a valid string, if so continue forming the string
         idx ++;      
@@ -157,6 +160,19 @@ void __attribute__ ((__interrupt__, __auto_psv__)) _U1RXInterrupt() {
         idx = 0; //restart string formation from the beginning
     }
     char_read ++;
+    */
+    for (int i = 0; i < 3; i++) {
+        msg [w_idx] = U1RXREG;
+        w_idx = (w_idx + 1) % 16;
+    }
+    char_read += 3;
+    value_rec = 1;
+    /*while (U1STAbits.URXDA == 1) {
+        msg [w_idx] = U1RXREG;
+        w_idx = (w_idx + 1) % 16;
+        char_read ++;
+    }*/
+    
     
     IFS0bits.U1RXIF = 0;
 }
@@ -164,6 +180,8 @@ void algorithm() {
     tmr_wait_ms(TIMER2, 7);
 }
 int main() {
+    char out_msg [50];
+    char num_str [48];
     ANSELA = ANSELB = ANSELC = ANSELD = ANSELE = ANSELG = 0x0000;
     TRISAbits.TRISA0 = 0;
     TRISGbits.TRISG9 = 0;
@@ -195,7 +213,9 @@ int main() {
     //enable tx on uart1
     U1STAbits.UTXEN = 1;
     //set the flag for reception
-    U1STAbits.URXISEL = 0b00; //flag raised when 3 characters are read
+    U1STAbits.URXISEL = 0b10; //flag raised when 3 characters are read
+    U1STAbits.UTXISEL1 = 0;
+    U1STAbits.UTXISEL0 = 0;
     
     RPINR1bits.INT2R = 0x58; //map interrupt INT2 to RPI88 (pin of button T2)
     IFS1bits.INT2IF = 0;
@@ -209,7 +229,7 @@ int main() {
     while(1) {
         algorithm();
         // code to handle the assignment
-        if (value_rec == 1) { //process received string if new message from UART has been received
+        /*if (value_rec == 1) { //process received string if new message from UART has been received
             if (msg [0] == 'L' && msg [1] == 'D') {
                 if (msg [2] == '1') { // if "LD1" toggle LED1
                     LATAbits.LATA0 = !LATAbits.LATA0;
@@ -219,20 +239,78 @@ int main() {
                 }
             }
             value_rec = 0;
+        }*/
+        if (value_rec == 1) {
+            if (msg [(r_idx % 16)] == 'L' && msg [(r_idx + 1)% 16] == 'D') {
+                switch (msg [(r_idx + 2) % 16]) {
+                    case '1': 
+                        LATAbits.LATA0 = !LATAbits.LATA0;
+                        break;
+                    case '2':
+                        LD_toggle = !LD_toggle;
+                        break;
+                    default:
+                        break;
+                }
+            //flush reception buffer if string doesn't match
+            }
+            while (U1STAbits.URXDA == 1) {
+                trash = U1RXREG;
+            }
+            r_idx = (r_idx + 3) % 16;
+            value_rec = 0;
         }
+        /*for (int i = 0; i < 15; i++) {
+            //tmr_wait_ms (TIMER2, 100);
+            check_msg [0] = msg [i%16];
+            check_msg [1] = msg [(i + 1) % 16];
+            //U1TXREG = check_msg [0];
+            //if (strcmp (check_msg, val_msg) == 0) {
+            if ((check_msg [0] == 'L') && (check_msg [1] == 'D')) {
+                switch (msg [(i + 2) % 16]) {
+                    case '1': 
+                        LATAbits.LATA0 = !LATAbits.LATA0;
+                        break;
+                    case '2':
+                        LD_toggle = !LD_toggle;
+                        break;
+                    default:
+                        break;
+                }
+                msg [i % 16] = msg [(i + 1) % 16] = msg [(i + 2) % 16] = 'X'; 
+            }
+        }*/
         switch (button_press) {
             case 2://button T2: number of chars received
-                U1TXREG = 'C';
+                /*U1TXREG = 'C';
                 U1TXREG = '=';
                 U1TXREG = '0' + ((char_read / 10) % 10);
                 U1TXREG = '0' + (char_read % 10);
+                button_press = 0;*/
+                sprintf (out_msg, "C=");
+                sprintf (num_str, "%d", char_read);
+                strcat (out_msg, num_str);
+                for (int i = 0; i < strlen (out_msg); i++){
+                    while (IFS0bits.U1TXIF == 0 && U1STAbits.TRMT == 0);
+                    IFS0bits.U1TXIF = 0;
+                    U1TXREG = out_msg [i];
+                }
                 button_press = 0;
                 break;
             case 3://button T3: number of deadlines missed
-                U1TXREG = 'D';
+                /*U1TXREG = 'D';
                 U1TXREG = '=';
                 U1TXREG = '0' + ((missed_deadlines / 10) % 10);
                 U1TXREG = '0' + (missed_deadlines % 10);
+                button_press = 0;*/
+                sprintf (out_msg, "D=");
+                sprintf (num_str, "%d", missed_deadlines);
+                strcat (out_msg, num_str);
+                for (int i = 0; i < strlen (out_msg); i++){
+                    while (IFS0bits.U1TXIF == 0 && U1STAbits.TRMT == 0);
+                    IFS0bits.U1TXIF = 0;
+                    U1TXREG = out_msg [i];
+                }
                 button_press = 0;
                 break;
             default:
