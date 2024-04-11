@@ -291,8 +291,7 @@ int main() {
                 sprintf (num_str, "%d", char_read);
                 strcat (out_msg, num_str);
                 for (int i = 0; i < strlen (out_msg); i++){
-                    while (IFS0bits.U1TXIF == 0 && U1STAbits.TRMT == 0);
-                    IFS0bits.U1TXIF = 0;
+                    while (U1STAbits.UTXBF == 1);
                     U1TXREG = out_msg [i];
                 }
                 button_press = 0;
@@ -307,8 +306,7 @@ int main() {
                 sprintf (num_str, "%d", missed_deadlines);
                 strcat (out_msg, num_str);
                 for (int i = 0; i < strlen (out_msg); i++){
-                    while (IFS0bits.U1TXIF == 0 && U1STAbits.TRMT == 0);
-                    IFS0bits.U1TXIF = 0;
+                    while (U1STAbits.UTXBF == 1);
                     U1TXREG = out_msg [i];
                 }
                 button_press = 0;
