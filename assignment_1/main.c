@@ -12,20 +12,26 @@
 #include "stdio.h"
 #include "math.h"
 
+
+/*to do:
+* mobe measurement in main (without timer interrupt);
+ * review uart sending stop
+*/
 #define CS1 LATBbits.LATB3
 #define CS2 LATBbits.LATB4
 #define CS3 LATDbits.LATD6
 
 
-int mask_3_lsb = 0xFF - 7;
-int meas_buf_x [5];
-int meas_buf_y [5];
-int meas_buf_z [5];
+int16_t mask_3_lsb = 0xF8;
+int16_t mask_1_lsb = 0xFE;
+int16_t meas_buf_x [5];
+int16_t meas_buf_y [5];
+int16_t meas_buf_z [5];
 int meas_idx = 0;
 float yaw = 0;
 #define tx_buf_size 60
 #define msg_size 30
-char uart_out [tx_buf_size] = {0};
+char uart_out [tx_buf_size];
 int write_idx = 0, read_idx = 0;
 
 void algorithm() {
@@ -60,18 +66,20 @@ int spi_write(unsigned int addr) {
 }
 
 void __attribute__ ((__interrupt__, __auto_psv__)) _U1TXInterrupt() {
-    //LATAbits.LATA0 = 1;
+    LATAbits.LATA0 = 0;
     if (read_idx == write_idx) {
         //LATAbits.LATA0 = 1;
         IEC0bits.U1TXIE = 0;
+        LATAbits.LATA0 = 1;
     } else {
         U1TXREG = uart_out [read_idx % tx_buf_size];
         //read_idx = (read_idx + 1)%tx_buf_size;
         read_idx ++;
+        read_idx =  read_idx % tx_buf_size;
         //LATGbits.LATG9 = 1;
         IFS0bits.U1TXIF = 0;
     }
-    //LATAbits.LATA0 = 0;
+    
 }
 
 void upload_to_uart_buf (char* out_msg, char* uart_buf) {
@@ -79,6 +87,7 @@ void upload_to_uart_buf (char* out_msg, char* uart_buf) {
         uart_buf [write_idx % tx_buf_size] = out_msg [i];
         //write_idx = (write_idx + 1) % tx_buf_size;
         write_idx ++;
+        write_idx = write_idx % tx_buf_size;
         //write_idx = write_idx % tx_buf_size;
     }
 }
@@ -104,7 +113,7 @@ void __attribute__ ((__interrupt__, __auto_psv__)) _T3Interrupt () {
     meas_buf_x [meas_idx] = meas_buf_x [meas_idx] | (spi_write (0x00) /**/<< 8/**/ /** 256/**/);
     meas_buf_y [meas_idx] = spi_write (0x00) & mask_3_lsb;
     meas_buf_y [meas_idx] = meas_buf_y [meas_idx] | (spi_write (0x00) /**/<< 8/**/ /** 256/**/);
-    meas_buf_z [meas_idx] = spi_write (0x00) & mask_3_lsb;
+    meas_buf_z [meas_idx] = spi_write (0x00) & mask_1_lsb;
     meas_buf_z [meas_idx] = meas_buf_z [meas_idx] | (spi_write (0x00) /**/<< 8/**/ /** 256/**/);
     meas_idx ++;
     IFS0bits.T3IF = 0;
@@ -152,7 +161,7 @@ int main(void) {
     CS3 = 1;*/
     //transition to 25 khz
     //write 0b110 on register 0x4C's data rate bits (bits 3, 4 and 5)
-    //cambined with the transtition to active mode, writing 0b110000 on register 0x4C
+    //combined with the transtition to active mode, writing 0b110000 on register 0x4C
     CS3 = 0;
     spi_write (0x4C);
     spi_write (0b110000);
@@ -175,7 +184,7 @@ int main(void) {
     
 
 
-    float mag_average [3];
+    int16_t mag_average [3];
     char out_msg [msg_size];
     
     tmr_setup_period (TIMER1, 10);
@@ -192,7 +201,7 @@ int main(void) {
             for (int i = 0; i < 5; i++) {
                 mag_average [0] += meas_buf_x [i] /8;
                 mag_average [1] += meas_buf_y [i] /8;
-                mag_average [2] += meas_buf_z [i] /8;
+                mag_average [2] += meas_buf_z [i] /2;
             }
             for (int i = i; i < 3; i++) {
                 mag_average [i] /= 5.0;
@@ -200,7 +209,8 @@ int main(void) {
             //sprintf (out_msg, "mag %d\n", meas_buf_x [0]);
             IEC0bits.T3IE = 1;
             
-            sprintf (out_msg, "MAG,%.3f,%.3f,%.3f;\n", (double) mag_average [0], (double) mag_average [1], (double) mag_average[2]);
+            //sprintf (out_msg, "MAG,%.3f,%.3f,%.3f;\n", (double) mag_average [0], (double) mag_average [1], (double) mag_average[2]);
+            sprintf (out_msg, "MAG, %d, %d, %d\n", mag_average [0], mag_average [1], mag_average [2]);
                 //LATGbits.LATG9 = 1;
             //sprintf (out_msg, "testT");
             //sprintf (out_msg, "%f\n", (double) mag_average [0]);
@@ -223,9 +233,9 @@ int main(void) {
             IEC0bits.U1TXIE = 1;
             //IEC1bits.T4IE = 1;
             //LATAbits.LATA0 = 0;
-            yaw = atan2f (mag_average [1], mag_average [0]);
+            yaw = atan2f ((float) mag_average [1], (float) mag_average [0]);
             //conversion from radians to degree
-            //yaw = (yaw / 3.14) * 180;
+            yaw = (yaw / 3.14) * 180;
             sprintf (out_msg, "YAW, %.3f\n", (double) yaw);
             IEC0bits.U1TXIE = 0;
             upload_to_uart_buf(out_msg, uart_out);
@@ -238,6 +248,7 @@ int main(void) {
         */
         //if (IEC0bits.T3IE != 1)
         IEC0bits.T3IE = 1;
+        //LATAbits.LATA0 = U1STAbits.TRMT;
         
         
         
