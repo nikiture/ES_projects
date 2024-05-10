@@ -15,8 +15,10 @@
 #define CS1 LATBbits.LATB3
 #define CS2 LATBbits.LATB4
 #define CS3 LATDbits.LATD6
+
 #define sample_counter 4
 #define transmit_counter 20
+
 #define tx_buf_size 60
 #define msg_size 30
 
