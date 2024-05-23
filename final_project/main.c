@@ -9,6 +9,15 @@
 #include "xc.h"
 #include "parser.h"
 #include "timer.h"
+#include"string.h"
+#include "stdio.h"
+
+
+/*to do from assignment 1 evaluation:
+ * buffers full check
+ * more than one character written in uart tx buffer
+*/
+
 
 #define WAIT_FOR_START (0)
 #define EXECUTION (1)
@@ -125,18 +134,23 @@ int instruction_counter = 0;
 
 
 int instruction_time = 0;
-void execute_commands () { 
+#define min_distance 20
+void execute_commands (int distance) { 
+    
     //control wheels based on current command in FIFO queue: 1 for forward, 2 for left steering, 3 for right steering and 4 for backward movement 
     instruction* curr_instruction = &(commands_list [inst_read_idx]);
     switch (curr_instruction->command) {
         case 1:
-            move_forward (90);
+            if (distance >= min_distance) move_forward (90);
+            else stop ();
             break;
         case 2:
-            steer_left ();
+            if (distance >= min_distance) steer_left ();
+            else stop ();
             break;
         case 3:
-            steer_right ();
+            if (distance >= min_distance) steer_right ();
+            else stop ();
             break;
         case 4:
             move_backward (90);
@@ -178,7 +192,9 @@ void __attribute ((__interrupt__, __auto_psv__)) _U1RXInterrupt () {
     //if (U1STAbits.URXDA == 1)
     IFS0bits.U1RXIF = 0;
 }
+
 char type_string [] = "PCCMD"; 
+
 int get_instruction (parser_state* ps, int * x, int * t) {
     //check if type from parser state is compatible with expected types, 
     //check needed for acknowledgement message 
@@ -230,18 +246,25 @@ int get_instruction (parser_state* ps, int * x, int * t) {
     
 }
 */
-#define tx_buf_size 24
+#define tx_buf_size 64
 char uart_buf [tx_buf_size];
 int tx_write_idx = 0;
 int tx_read_idx = 0;
+int char_to_send = 0;
 
 void upload_to_uart_buf (char* out_msg, char* uart_out) {
     for (int i = 0; out_msg [i] != '\0'; i++) {
+        while (char_to_send >= tx_buf_size) /*LATGbits.LATG9 = 1*/;
+        //IEC0bits.U1TXIE = 0;
+        char_to_send ++;
+        //LATGbits.LATG9 = 0;
         uart_out [tx_write_idx % tx_buf_size] = out_msg [i];
         tx_write_idx ++;
         tx_write_idx %= tx_buf_size;
+        //IEC0bits.U1TXIE = 1;
     }
 }
+
 void upload_char_to_uart_buf (char out_char, char* uart_out) {
     uart_out [tx_write_idx % tx_buf_size] = out_char;
     tx_write_idx ++;
@@ -250,20 +273,36 @@ void upload_char_to_uart_buf (char out_char, char* uart_out) {
 
 void __attribute__ ((__interrupt__, __auto_psv__)) _U1TXInterrupt() {
     //LATAbits.LATA0 = 1;
-    if (tx_read_idx == tx_write_idx) {
-        IEC0bits.U1TXIE = 0;
-    } else {
-        U1TXREG = uart_buf [tx_read_idx % tx_buf_size];
-        tx_read_idx ++;
-        tx_read_idx %= tx_buf_size;
-        IFS0bits.U1TXIF = 0;
-    }
+    IFS0bits.U1TXIF = 0;
+    while (U1STAbits.UTXBF == 0) {
+        if (char_to_send <= 0) {
+            //IEC0bits.U1TXIE = 0;
+            break;
+        } else {
+            U1TXREG = uart_buf [tx_read_idx % tx_buf_size];
+            tx_read_idx ++;
+            tx_read_idx %= tx_buf_size;
+            char_to_send --;
+        }
     //LATAbits.LATA0 = 0;
+    }
 }
+
+float compute_dist_from_volt (float v) {
+    return 2.34 - 4.74 * v + 4.06 * v * v - 1.60 * v * v * v + 0.24 * v * v * v * v;
+}
+
 #define baud_rate 9600
 int main(void) {
     ANSELA = ANSELB = ANSELC = ANSELD = ANSELE = ANSELG = 0;
+    ANSELBbits.ANSB11 = 1;
+    ANSELBbits.ANSB15 = 1;
+    
+    TRISBbits.TRISB11 = 1;
+    TRISBbits.TRISB14 = 1;
     TRISAbits.TRISA0 = 0;
+    TRISBbits.TRISB9 = 0;
+    TRISGbits.TRISG9 = 0;
     
     TRISBbits.TRISB8 = TRISFbits.TRISF1 = 0;//pins for left and right indicators set to output
     
@@ -289,7 +328,7 @@ int main(void) {
     U1STAbits.URXISEL = 0b00;
     
     //UART transmission interrupt flag raise
-    U1STAbits.UTXISEL0 = 1;
+    U1STAbits.UTXISEL0 = 0;
     U1STAbits.UTXISEL1 = 0;
     
     IFS0bits.U1TXIF = 0;
@@ -326,6 +365,27 @@ int main(void) {
     IFS1bits.INT1IF = 0;
     IEC1bits.INT1IE = 1;
     
+    
+    //adc setup
+    //enable IR sensor
+    LATBbits.LATB9 = 1;
+    //to add logic for adcs and samc
+    AD1CON3bits.ADCS = 128; 
+    AD1CON1bits.ASAM = 1;
+    AD1CON1bits.SSRC = 7;
+    AD1CON3bits.SAMC = 23;
+    //using scan mode on 2 pins on channel 0
+    AD1CON2bits.CHPS = 0; //only channel 0 used
+    //AD1CHS0bits.CH0SA = 0b00101; //positive input is AN 5
+    //enable scan mode for AN 11 and AN 14/15
+    AD1CSSL = 0;
+    AD1CSSLbits.CSS11 = 1;
+    AD1CSSLbits.CSS14 = 1;    
+    AD1CON2bits.CSCNA = 1;
+    AD1CON1bits.ADON = 1;
+    
+    
+    
     parser_state ps;
     ps.state = STATE_DOLLAR;
     ps.index_type = 0;
@@ -335,10 +395,16 @@ int main(void) {
     char response_prefix [7] = "$MACK,"; //start of acknowledgement message both for correct and wrong message
     int x, t;
     tmr_setup_period (TIMER1, 1);
-    int res;
-    IFS0bits.U1TXIF = 1;
-    int count_1_Hz = 0;
+    int IR_volt;
+    float IR_analog_volt;
+    int IR_distance = 150;
+    //IFS0bits.U1TXIF = 1;
+    int count_1_Hz = 0, count_10_Hz = 0;
     while (1) {
+        //measure values from IR sensor
+        IR_volt = ADC1BUF1;
+        IR_analog_volt = 3.3 / 1024 * IR_volt;
+        IR_distance = compute_dist_from_volt(IR_analog_volt);
         //check for valid or erroneous message from parser
         switch (msg_state) {
             case ERR_MESSAGE:
@@ -350,7 +416,15 @@ int main(void) {
                 out_msg [6] = '0';
                 out_msg [7] = '*';
                 out_msg [8] = '\0';
-                upload_to_uart_buf(out_msg, uart_buf);
+                IEC0bits.U1TXIE = 0;
+                if (U1STAbits.TRMT == 0) //if transmisssion still ongoing no need to put characeter in uart buffer to start transmission of new message
+                    upload_to_uart_buf(out_msg, uart_buf);
+                else {
+                    //if no ongoing transmission needed to start a new one by putting the first character directly in the uart fifo 
+                    //and the rest of the message in the circular buffer
+                    U1TXREG = out_msg [0];
+                    upload_to_uart_buf (out_msg + 1, uart_buf);
+                }
                 IEC0bits.U1TXIE = 1;
                 msg_state = NO_MESSAGE;
                 break;
@@ -381,7 +455,15 @@ int main(void) {
                 out_msg [7] = '*';
                 out_msg [8] = '\0';
                 msg_state = NO_MESSAGE;
-                upload_to_uart_buf(out_msg, uart_buf);
+                IEC0bits.U1TXIE = 0;
+                if (U1STAbits.TRMT == 0) //if transmisssion still ongoing no need to put characeter in uart buffer to start transmission of new message
+                    upload_to_uart_buf(out_msg, uart_buf);
+                else {
+                    //if no ongoing transmission needed to start a new one by putting the first character directly in the uart fifo 
+                    //and the rest of the message in the circular buffer
+                    U1TXREG = out_msg [0];
+                    upload_to_uart_buf (out_msg + 1, uart_buf);
+                }
                 IEC0bits.U1TXIE = 1;
                 break;
             default:
@@ -398,7 +480,7 @@ int main(void) {
             IEC0bits.U1RXIE = 1;
             //upload_char_to_uart_buf(in_buf [in_read_idx], uart_buf);
             //IFS0bits.U1TXIF = 1;
-            IEC0bits.U1TXIE = 1;
+            //IEC0bits.U1TXIE = 1;
             msg_state = parse_byte(&ps, in_buf [in_read_idx]);
             //LATAbits.LATA0 = parse_byte(&ps, in_buf [in_read_idx]);
             /*if (msg_state != NO_MESSAGE)
@@ -407,32 +489,65 @@ int main(void) {
             in_read_idx ++;
             in_read_idx %= rx_buf_size;
         }
+        count_1_Hz ++;
+        count_10_Hz ++;
         //blinking and execution control
         switch (CONTROL_STATE) {
             case WAIT_FOR_START:
                 stop ();
-                count_1_Hz ++;
                 if (count_1_Hz >= 1000) { //frequency of 1 Hz, 1000 times the main loop frequency (1 kHz)
                     //LATAbits.LATA0 = !LATAbits.LATA0;
                     //blink left and right indicators and A0 LED
                     //indicators on pins RB8 and RF1
                     LATBbits.LATB8 = !LATBbits.LATB8;
                     LATFbits.LATF1 = LATAbits.LATA0 = LATBbits.LATB8;
-                    count_1_Hz = 0;
+                    //count_1_Hz = 0;
                 }
                 break;
             case EXECUTION:
                 //blinking of A0 LED at 1 Hz
                 //execution of commands in FIFO queue (if any are present)
-                execute_commands();
+                execute_commands(IR_distance);
                 LATBbits.LATB8 = LATFbits.LATF1 = 0;
-                count_1_Hz ++;
                 if (count_1_Hz >= 1000) {
                     LATAbits.LATA0 = !LATAbits.LATA0;
-                    count_1_Hz = 0;
+                    //count_1_Hz = 0;
                 }
                 break;
         }
+        if (count_1_Hz >= 1000) {
+            //read values from adc for battery level and send them through the uart
+            count_1_Hz = 0;
+            
+            int batt_lev = ADC1BUF0;           
+            float batt_meas = 3.3 / 1024 * batt_lev * 3; 
+            sprintf (out_msg, "$MBATT,%f*", batt_meas);
+            IEC0bits.U1TXIE = 0;
+            if (U1STAbits.TRMT == 0) //if transmisssion still ongoing no need to put characeter in uart buffer to start transmission of new message
+                upload_to_uart_buf(out_msg, uart_buf);
+            else {
+                //if no ongoing transmission needed to start a new one by putting the first character directly in the uart fifo 
+                //and the rest of the message in the circular buffer
+                U1TXREG = out_msg [0];
+                upload_to_uart_buf (out_msg + 1, uart_buf);
+            }
+            IEC0bits.U1TXIE = 1;
+        }
+        if (count_10_Hz >= 100) {
+            count_10_Hz = 0;
+            sprintf (out_msg, "$MDIST,%f*", IR_analog_volt);
+            IEC0bits.U1TXIE = 0;
+            if (U1STAbits.TRMT == 0) //if transmisssion still ongoing no need to put characeter in uart buffer to start transmission of new message
+                upload_to_uart_buf(out_msg, uart_buf);
+            else {
+                //if no ongoing transmission needed to start a new one by putting the first character directly in the uart fifo 
+                //and the rest of the message in the circular buffer
+                U1TXREG = out_msg [0];
+                upload_to_uart_buf (out_msg + 1, uart_buf);
+            }
+            IEC0bits.U1TXIE = 1;
+        }
+        LATGbits.LATG9 = U1STAbits.TRMT;
         tmr_wait_period (TIMER1);
         //LATAbits.LATA0 = U1STAbits.OERR;
     }
