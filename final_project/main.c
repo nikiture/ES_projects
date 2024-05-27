@@ -53,8 +53,6 @@ void set_pwm (int oc, int duty_cycle) {
 }
 
 void move_forward (int duty_cycle) {
-    if (duty_cycle > 100)
-        duty_cycle = 100;
     set_pwm (OC_2, duty_cycle);
     set_pwm (OC_4, duty_cycle);
     set_pwm (OC_1, 0);
@@ -113,19 +111,7 @@ typedef struct {
     int command;
     int duration;
 } instruction;
-/*#define STATE_DOLLAR (1)
-#define STATE_TYPE (2)
-#define STATE_PAYLOAD (3)
 
-typedef struct {
-    int state;
-    char msg_type [6];
-    char msg_payload [16];
-    int type_idx = 0;
-    int payload_idx;
-    
-} parser_state;
-*/
 //FIFO (circular buffer) of instructions
 instruction commands_list [10];
 int inst_write_idx = 0;
@@ -139,6 +125,7 @@ void execute_commands (int distance) {
     
     //control wheels based on current command in FIFO queue: 1 for forward, 2 for left steering, 3 for right steering and 4 for backward movement 
     instruction* curr_instruction = &(commands_list [inst_read_idx]);
+    //if moving forward/ steering  check for obstacl4e distance and don't move if closer than 20 cm
     switch (curr_instruction->command) {
         case 1:
             if (distance >= min_distance) move_forward (90);
@@ -178,17 +165,18 @@ int chars_to_parse = 0;
 
 void __attribute ((__interrupt__, __auto_psv__)) _U1RXInterrupt () {
     //LATAbits.LATA0 = 1;
-    /*while (U1STAbits.URXDA == 1) {
+    while (U1STAbits.URXDA == 1) {
         in_buf [in_write_idx] = U1RXREG;
         in_write_idx ++;
         in_write_idx %= rx_buf_size;
         chars_to_parse ++;
-    }*/
-    char value = U1RXREG;
+    }
+    /*char value = U1RXREG;
     in_buf [in_write_idx] = value;
     in_write_idx ++;
     in_write_idx %= rx_buf_size;
     chars_to_parse ++;
+    */
     //if (U1STAbits.URXDA == 1)
     IFS0bits.U1RXIF = 0;
 }
@@ -213,39 +201,7 @@ int get_instruction (parser_state* ps, int * x, int * t) {
     *t = extract_integer(ps->msg_payload + i);
     return 1;
 }
-/*int parser (parser_state * ps, char byte) {
-    switch (ps->state) {
-        case STATE_DOLLAR:
-            if (byte == '$') {
-                ps->state = STATE_TYPE;
-                ps->type_idx = 0;
-            }
-            break;
-        case STATE_TYPE:
-            if (byte == ',') {
-                ps->state = STATE_PAYLOAD;
-                ps->msg_type [ps->type_idx] = '\0';
-                ps->payload_idx = 0;
-            } else if (ps->type_idx == 6) {
-                ps-> state = STATE_DOLLAR;
-                ps->type_idx = 0;
-            } else {
-                ps->msg_type [ps->type_idx] = byte;
-                ps->type_idx++;
-            }
-            break;
-        case STATE_PAYLOAD:
-            if (byte == '*') {
-                ps->state = STATE_DOLLAR;
-                ps->msg_payload[ps->payload_idx] = '\0';
-            }
-            break;
-        default:
-            break;
-    }
-    
-}
-*/
+
 #define tx_buf_size 64
 char uart_buf [tx_buf_size];
 int tx_write_idx = 0;
@@ -296,17 +252,17 @@ float compute_dist_from_volt (float v) {
 int main(void) {
     ANSELA = ANSELB = ANSELC = ANSELD = ANSELE = ANSELG = 0;
     ANSELBbits.ANSB11 = 1;
-    ANSELBbits.ANSB15 = 1;
+    //ANSELBbits.ANSB15 = 1;
     ANSELBbits.ANSB14 = 1;
     
     TRISBbits.TRISB11 = 1;
     TRISBbits.TRISB14 = 1;
-    TRISBbits.TRISB15 = 1;
+   // TRISBbits.TRISB15 = 1;
     
     TRISAbits.TRISA0 = 0;
-    TRISAbits.TRISA3 = 0;
+    //TRISAbits.TRISA3 = 0;
     TRISBbits.TRISB9 = 0;
-    TRISGbits.TRISG9 = 0;
+    //TRISGbits.TRISG9 = 0;
     
     TRISBbits.TRISB8 = TRISFbits.TRISF1 = 0;//pins for left and right indicators set to output
     
@@ -373,7 +329,7 @@ int main(void) {
     //adc setup
     //enable IR sensor
     LATBbits.LATB9 = 1;
-    LATAbits.LATA3 = 1;
+    //LATAbits.LATA3 = 1;
     //to add logic for adcs and samc
     AD1CON3bits.ADCS = 8; 
     AD1CON1bits.ASAM = 1;
@@ -396,10 +352,8 @@ int main(void) {
     AD1CON2bits.SMPI = 1;
     AD1CON2bits.CSCNA = 1; // Enable Channel Scanning
     // Initialize Channel Scan Selection
-    AD1CSSLbits.CSS11=1; // Enable AN2 for scan
-    AD1CSSLbits.CSS14=1; // Enable AN3 for scan
-    //AD1CSSLbits.CSS5=1; // Enable AN5 for scan
-    //AD1CSSLbits.CSS6=1; // Enable AN6 for scan
+    AD1CSSLbits.CSS11=1; // Enable AN11 for scan
+    AD1CSSLbits.CSS14=1; // Enable A14 for scan
     
     AD1CON1bits.ADON = 1;
     
@@ -409,16 +363,22 @@ int main(void) {
     ps.state = STATE_DOLLAR;
     ps.index_type = 0;
     ps.index_payload = 0;
+    
     int msg_state = 0;
+    
     char out_msg [16];
     char response_prefix [7] = "$MACK,"; //start of acknowledgement message both for correct and wrong message
     int x, t;
+    
     tmr_setup_period (TIMER1, 1);
+    
     int IR_volt;
     float IR_analog_volt;
     int IR_distance = 150;
+    
     //IFS0bits.U1TXIF = 1;
     int count_1_Hz = 0, count_10_Hz = 0;
+    
     while (1) {
         //measure values from IR sensor
         IR_volt = ADC1BUF1;
@@ -540,7 +500,7 @@ int main(void) {
             
             int batt_lev = ADC1BUF0;           
             float batt_meas = 3.3 / 1024 * batt_lev * 3; 
-            sprintf (out_msg, "$MBATT,%f*", batt_meas);
+            sprintf (out_msg, "$MBATT,%.2f*\n", batt_meas);
             IEC0bits.U1TXIE = 0;
             if (U1STAbits.TRMT == 0) //if transmisssion still ongoing no need to put characeter in uart buffer to start transmission of new message
                 upload_to_uart_buf(out_msg, uart_buf);
@@ -554,7 +514,7 @@ int main(void) {
         }
         if (count_10_Hz >= 100) {
             count_10_Hz = 0;
-            sprintf (out_msg, "$MDIST,%d*", IR_distance);
+            sprintf (out_msg, "$MDIST,%d*\n", IR_distance);
             IEC0bits.U1TXIE = 0;
             if (U1STAbits.TRMT == 0) //if transmisssion still ongoing no need to put characeter in uart buffer to start transmission of new message
                 upload_to_uart_buf(out_msg, uart_buf);
@@ -566,7 +526,7 @@ int main(void) {
             }
             IEC0bits.U1TXIE = 1;
         }
-        LATGbits.LATG9 = U1STAbits.TRMT;
+        //LATGbits.LATG9 = U1STAbits.TRMT;
         tmr_wait_period (TIMER1);
         //LATAbits.LATA0 = U1STAbits.OERR;
     }
