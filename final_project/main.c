@@ -297,10 +297,14 @@ int main(void) {
     ANSELA = ANSELB = ANSELC = ANSELD = ANSELE = ANSELG = 0;
     ANSELBbits.ANSB11 = 1;
     ANSELBbits.ANSB15 = 1;
+    ANSELBbits.ANSB14 = 1;
     
     TRISBbits.TRISB11 = 1;
     TRISBbits.TRISB14 = 1;
+    TRISBbits.TRISB15 = 1;
+    
     TRISAbits.TRISA0 = 0;
+    TRISAbits.TRISA3 = 0;
     TRISBbits.TRISB9 = 0;
     TRISGbits.TRISG9 = 0;
     
@@ -369,19 +373,34 @@ int main(void) {
     //adc setup
     //enable IR sensor
     LATBbits.LATB9 = 1;
+    LATAbits.LATA3 = 1;
     //to add logic for adcs and samc
-    AD1CON3bits.ADCS = 128; 
+    AD1CON3bits.ADCS = 8; 
     AD1CON1bits.ASAM = 1;
     AD1CON1bits.SSRC = 7;
-    AD1CON3bits.SAMC = 23;
+    AD1CON3bits.SAMC = 10;
+    /*
     //using scan mode on 2 pins on channel 0
     AD1CON2bits.CHPS = 0; //only channel 0 used
     //AD1CHS0bits.CH0SA = 0b00101; //positive input is AN 5
+    AD1CHS0bits.CH0SA = 14;
     //enable scan mode for AN 11 and AN 14/15
-    AD1CSSL = 0;
+    //AD1CSSL = 0;
     AD1CSSLbits.CSS11 = 1;
-    AD1CSSLbits.CSS14 = 1;    
+    //AD1CSSLbits.CSS15 = 1;    
+    AD1CSSLbits.CSS14 = 1;
     AD1CON2bits.CSCNA = 1;
+    AD1CON1bits.ADON = 1;
+    */
+    //AD1CHS0bits.ASAM = 1; // Enable Automatic Sampling 
+    AD1CON2bits.SMPI = 1;
+    AD1CON2bits.CSCNA = 1; // Enable Channel Scanning
+    // Initialize Channel Scan Selection
+    AD1CSSLbits.CSS11=1; // Enable AN2 for scan
+    AD1CSSLbits.CSS14=1; // Enable AN3 for scan
+    //AD1CSSLbits.CSS5=1; // Enable AN5 for scan
+    //AD1CSSLbits.CSS6=1; // Enable AN6 for scan
+    
     AD1CON1bits.ADON = 1;
     
     
@@ -404,7 +423,7 @@ int main(void) {
         //measure values from IR sensor
         IR_volt = ADC1BUF1;
         IR_analog_volt = 3.3 / 1024 * IR_volt;
-        IR_distance = compute_dist_from_volt(IR_analog_volt);
+        IR_distance = compute_dist_from_volt(IR_analog_volt) * 100; //direct conversion in cm
         //check for valid or erroneous message from parser
         switch (msg_state) {
             case ERR_MESSAGE:
@@ -535,7 +554,7 @@ int main(void) {
         }
         if (count_10_Hz >= 100) {
             count_10_Hz = 0;
-            sprintf (out_msg, "$MDIST,%f*", IR_analog_volt);
+            sprintf (out_msg, "$MDIST,%d*", IR_distance);
             IEC0bits.U1TXIE = 0;
             if (U1STAbits.TRMT == 0) //if transmisssion still ongoing no need to put characeter in uart buffer to start transmission of new message
                 upload_to_uart_buf(out_msg, uart_buf);
