@@ -202,7 +202,7 @@ int get_instruction (parser_state* ps, int * x, int * t) {
     return 1;
 }
 
-#define tx_buf_size 64
+#define tx_buf_size 16
 char uart_buf [tx_buf_size];
 int tx_write_idx = 0;
 int tx_read_idx = 0;
@@ -210,8 +210,12 @@ int char_to_send = 0;
 
 void upload_to_uart_buf (char* out_msg, char* uart_out) {
     for (int i = 0; out_msg [i] != '\0'; i++) {
-        while (char_to_send >= tx_buf_size) /*LATGbits.LATG9 = 1*/;
-        //IEC0bits.U1TXIE = 0;
+        while (char_to_send >= tx_buf_size) {
+            //LATGbits.LATG9 = 1;
+            IEC0bits.U1TXIE = 1;
+        }
+        IEC0bits.U1TXIE = 0;
+        //LATGbits.LATG9 = 0;
         char_to_send ++;
         //LATGbits.LATG9 = 0;
         uart_out [tx_write_idx % tx_buf_size] = out_msg [i];
@@ -262,7 +266,7 @@ int main(void) {
     TRISAbits.TRISA0 = 0;
     //TRISAbits.TRISA3 = 0;
     TRISBbits.TRISB9 = 0;
-    //TRISGbits.TRISG9 = 0;
+    TRISGbits.TRISG9 = 0;
     
     TRISBbits.TRISB8 = TRISFbits.TRISF1 = 0;//pins for left and right indicators set to output
     
@@ -394,7 +398,8 @@ int main(void) {
                 }
                 out_msg [6] = '0';
                 out_msg [7] = '*';
-                out_msg [8] = '\0';
+                out_msg [8] = '\n';
+                out_msg [9] = '\0';
                 IEC0bits.U1TXIE = 0;
                 if (U1STAbits.TRMT == 0) //if transmisssion still ongoing no need to put characeter in uart buffer to start transmission of new message
                     upload_to_uart_buf(out_msg, uart_buf);
@@ -432,7 +437,8 @@ int main(void) {
                 }
                 
                 out_msg [7] = '*';
-                out_msg [8] = '\0';
+                out_msg [8] = '\n';
+                out_msg [9] = '\0';
                 msg_state = NO_MESSAGE;
                 IEC0bits.U1TXIE = 0;
                 if (U1STAbits.TRMT == 0) //if transmisssion still ongoing no need to put characeter in uart buffer to start transmission of new message
@@ -527,7 +533,8 @@ int main(void) {
             IEC0bits.U1TXIE = 1;
         }
         //LATGbits.LATG9 = U1STAbits.TRMT;
-        tmr_wait_period (TIMER1);
+        //LATGbits.LATG9 = tmr_wait_period (TIMER1);
+        tmr_wait_period(TIMER1);
         //LATAbits.LATA0 = U1STAbits.OERR;
     }
     return 0;
