@@ -314,11 +314,12 @@ int main(void) {
      * oc4: right wheels forward
     */
     //pin remap for OC
-    RPOR0bits.RP65R = 0b010000;
-    RPOR1bits.RP66R = 0b010001;
-    RPOR1bits.RP67R = 0b010010;
-    RPOR2bits.RP68R = 0b010011;
+    RPOR0bits.RP65R = 0b010000; //OC1 (0b10000) to pin D1
+    RPOR1bits.RP66R = 0b010001; //OC2 (0b10001) to pin D2
+    RPOR1bits.RP67R = 0b010010; //OC3 (0b10010) to pin D3
+    RPOR2bits.RP68R = 0b010011; //OC4 (0b10011) to pin D4
     
+    //set all OCs in edge-aligned PWM mode
     OC1CON1bits.OCM = OC2CON1bits.OCM = OC3CON1bits.OCM = OC4CON1bits.OCM = 6;
     
     
@@ -368,7 +369,7 @@ int main(void) {
     ps.index_type = 0;
     ps.index_payload = 0;
     
-    int msg_state = 0;
+    int msg_state = NO_MESSAGE;
     
     char out_msg [16];
     char response_prefix [7] = "$MACK,"; //start of acknowledgement message both for correct and wrong message
@@ -384,10 +385,16 @@ int main(void) {
     int count_1_Hz = 0, count_10_Hz = 0;
     
     while (1) {
+        //counter for 1 Hz (lights blinking and battery measurements transmission) 
+        count_1_Hz ++;
+        //counter for 10 Hz (distance measurements transmission)
+        count_10_Hz ++;
+        
         //measure values from IR sensor
         IR_volt = ADC1BUF1;
+        //conversion from digital to analog value (voltage from pin)
         IR_analog_volt = 3.3 / 1024 * IR_volt;
-        IR_distance = compute_dist_from_volt(IR_analog_volt) * 100; //direct conversion in cm
+        IR_distance = compute_dist_from_volt(IR_analog_volt) * 100; // conversion  from pin voltsage to estimated distance in cm
         //check for valid or erroneous message from parser
         switch (msg_state) {
             case ERR_MESSAGE:
@@ -405,6 +412,7 @@ int main(void) {
                     upload_to_uart_buf(out_msg, uart_buf);
                 else {
                     //if no ongoing transmission needed to start a new one by putting the first character directly in the uart fifo 
+                    //to ensure uart tx flag raise from uart module
                     //and the rest of the message in the circular buffer
                     U1TXREG = out_msg [0];
                     upload_to_uart_buf (out_msg + 1, uart_buf);
@@ -445,6 +453,7 @@ int main(void) {
                     upload_to_uart_buf(out_msg, uart_buf);
                 else {
                     //if no ongoing transmission needed to start a new one by putting the first character directly in the uart fifo 
+                    //to ensure uart tx flag raise from uart module
                     //and the rest of the message in the circular buffer
                     U1TXREG = out_msg [0];
                     upload_to_uart_buf (out_msg + 1, uart_buf);
@@ -474,15 +483,14 @@ int main(void) {
             in_read_idx ++;
             in_read_idx %= rx_buf_size;
         }
-        count_1_Hz ++;
-        count_10_Hz ++;
+        
         //blinking and execution control
         switch (CONTROL_STATE) {
             case WAIT_FOR_START:
                 stop ();
                 if (count_1_Hz >= 1000) { //frequency of 1 Hz, 1000 times the main loop frequency (1 kHz)
                     //LATAbits.LATA0 = !LATAbits.LATA0;
-                    //blink left and right indicators and A0 LED
+                    //blink left and right indicators and A0 LED synchronously
                     //indicators on pins RB8 and RF1
                     LATBbits.LATB8 = !LATBbits.LATB8;
                     LATFbits.LATF1 = LATAbits.LATA0 = LATBbits.LATB8;
@@ -490,7 +498,7 @@ int main(void) {
                 }
                 break;
             case EXECUTION:
-                //blinking of A0 LED at 1 Hz
+                //blinking of A0 LED at 1 Hz and indicators turned off
                 //execution of commands in FIFO queue (if any are present)
                 execute_commands(IR_distance);
                 LATBbits.LATB8 = LATFbits.LATF1 = 0;
@@ -518,7 +526,7 @@ int main(void) {
             }
             IEC0bits.U1TXIE = 1;
         }
-        if (count_10_Hz >= 100) {
+        if (count_10_Hz >= 100) {//10 Hz frequency is 100 ms period (and 100 loops at 1kHz frequency)
             count_10_Hz = 0;
             sprintf (out_msg, "$MDIST,%d*\n", IR_distance);
             IEC0bits.U1TXIE = 0;
@@ -526,6 +534,7 @@ int main(void) {
                 upload_to_uart_buf(out_msg, uart_buf);
             else {
                 //if no ongoing transmission needed to start a new one by putting the first character directly in the uart fifo 
+                //to ensure uart tx flag raise from uart module
                 //and the rest of the message in the circular buffer
                 U1TXREG = out_msg [0];
                 upload_to_uart_buf (out_msg + 1, uart_buf);
