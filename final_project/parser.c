@@ -18,13 +18,11 @@ int parse_byte(parser_state* ps, char byte) {
             } else if (ps->index_type == 6) { // error! 
                 ps->state = STATE_DOLLAR;
                 ps->index_type = 0;
-                //LATAbits.LATA0 = 1;
                 return ERR_MESSAGE;
 			} else if (byte == '*') {
 				ps->state = STATE_DOLLAR; // get ready for a new message
                 ps->msg_type[ps->index_type] = '\0';
 				ps->msg_payload[0] = '\0'; // no payload
-                //LATAbits.LATA0 = 1;
                 return NEW_MESSAGE;
             } else {
                 ps->msg_type[ps->index_type] = byte; // ok!
@@ -35,12 +33,10 @@ int parse_byte(parser_state* ps, char byte) {
             if (byte == '*') {
                 ps->state = STATE_DOLLAR; // get ready for a new message
                 ps->msg_payload[ps->index_payload] = '\0';
-                //LATAbits.LATA0 = 1;
                 return NEW_MESSAGE;
             } else if (ps->index_payload == 100) { // error
                 ps->state = STATE_DOLLAR;
                 ps->index_payload = 0;
-                //LATAbits.LATA0 = 1;
                 return ERR_MESSAGE;
             } else {
                 ps->msg_payload[ps->index_payload] = byte; // ok!
