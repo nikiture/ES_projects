@@ -1,6 +1,6 @@
 /*
  * File:   main.c
- * Author: nikit
+ * Author: Torre Nicolò, Andrea Scorrano, Girum Molla Desalegn
  *
  * Created on 16 maggio 2024, 12.09
  */
@@ -11,12 +11,6 @@
 #include "timer.h"
 #include"string.h"
 #include "stdio.h"
-
-
-/*to do from assignment 1 evaluation:
- * buffers full check
- * more than one character written in uart tx buffer
-*/
 
 
 #define WAIT_FOR_START (0)
@@ -38,16 +32,16 @@ void set_pwm (int oc, int duty_cycle) {
     //set how long the output from the selected output compare's pwm is set on high as a percentage of one period
     switch (oc) {
         case OC_1:
-            OC1R = duty_cycle * (OC1RS / 100);
+            OC1R = duty_cycle * (OC1RS / 100.0);
             break;
         case OC_2:
-            OC2R = duty_cycle * (OC2RS / 100);
+            OC2R = duty_cycle * (OC2RS / 100.0);
             break;
         case OC_3:
-            OC3R = duty_cycle * (OC3RS / 100);
+            OC3R = duty_cycle * (OC3RS / 100.0);
             break;
         case OC_4:
-            OC4R = duty_cycle * (OC4RS / 100);
+            OC4R = duty_cycle * (OC4RS / 100.0);
             break;
     }
 }
@@ -85,15 +79,20 @@ void move_backward (int duty_cycle) {
     set_pwm (OC_3, duty_cycle);
     set_pwm (OC_1, duty_cycle);
 }
-
+int instruction_time = 0;
+int command_to_pop = 0;
 void __attribute__((__interrupt__, __auto_psv__)) _T2Interrupt () { //interrupt for button debouncing
     IFS0bits.T2IF = 0;
     IEC0bits.T2IE = 0;
     if (PORTEbits.RE8 == 1) {   
-        if (CONTROL_STATE == WAIT_FOR_START) 
+        if (CONTROL_STATE == WAIT_FOR_START) {
             CONTROL_STATE = EXECUTION;
-        else
+        }
+        else {//change to WAIT_FOR_START state and removal of current instruction
             CONTROL_STATE = WAIT_FOR_START;
+            if (instruction_time > 0) 
+                command_to_pop = 1;
+        }
     }
 }
 void __attribute__((__interrupt__, __auto_psv__)) _INT1Interrupt () {
@@ -119,7 +118,19 @@ int inst_read_idx = 0;
 int instruction_counter = 0;
 
 
-int instruction_time = 0;
+
+
+
+
+void pop_command (instruction* curr_command) {
+    //reset the instruction time to 0, set the current command to 0 (no action), move to the next item in the command FIFO    
+    instruction_time = 0;
+    curr_command->command = 0;
+    instruction_counter --;
+    inst_read_idx++;
+    inst_read_idx = inst_read_idx % 10;
+}
+
 #define min_distance 20
 void execute_commands (int distance) { 
     
@@ -150,11 +161,7 @@ void execute_commands (int distance) {
     //update time taken for this instruction and move to next instruction in FIFO if command's duration has elapsed
     instruction_time ++;
     if (instruction_time >= curr_instruction->duration) {
-        instruction_time = 0;
-        curr_instruction->command = 0;
-        instruction_counter --;
-        inst_read_idx++;
-        inst_read_idx = inst_read_idx % 10;
+        pop_command (curr_instruction);
     } 
 }
 #define rx_buf_size 20
@@ -165,7 +172,13 @@ int chars_to_parse = 0;
 
 void __attribute ((__interrupt__, __auto_psv__)) _U1RXInterrupt () {
     //LATAbits.LATA0 = 1;
+    IFS0bits.U1RXIF = 0;
+    
     while (U1STAbits.URXDA == 1) {
+        if (chars_to_parse >= rx_buf_size) {
+            LATGbits.LATG9 = 1;
+            break;
+        }
         in_buf [in_write_idx] = U1RXREG;
         in_write_idx ++;
         in_write_idx %= rx_buf_size;
@@ -178,7 +191,7 @@ void __attribute ((__interrupt__, __auto_psv__)) _U1RXInterrupt () {
     chars_to_parse ++;
     */
     //if (U1STAbits.URXDA == 1)
-    IFS0bits.U1RXIF = 0;
+    
 }
 
 char type_string [] = "PCCMD"; 
@@ -305,7 +318,7 @@ int main(void) {
     //peripheral clock, sync with ocxrs
     OC1CON2bits.SYNCSEL = OC2CON2bits.SYNCSEL = OC3CON2bits.SYNCSEL = OC4CON2bits.SYNCSEL = 0b11111;
     OC1CON1bits.OCTSEL = OC2CON1bits.OCTSEL = OC3CON1bits.OCTSEL = OC4CON1bits.OCTSEL = 0b111;
-    //Fp = 72 Mhz, for 10 khz ocxrs = 7200
+    //Fp = 72 Mhz, for 10 khz ocxrs = 72 MHz/ 10 kHz = 7200
     OC1RS = OC2RS = OC3RS = OC4RS = 7200;
     /*motor control:
      * oc3: right wheels backward
@@ -381,6 +394,11 @@ int main(void) {
     float IR_analog_volt;
     int IR_distance = 150;
     
+    /*//initialize FIFO commands to 0 (no action)
+    for (int i = 0; i < 10; i++) {
+        commands_list [i].command = 0;
+    }*/
+    
     //IFS0bits.U1TXIF = 1;
     int count_1_Hz = 0, count_10_Hz = 0;
     
@@ -394,7 +412,7 @@ int main(void) {
         IR_volt = ADC1BUF1;
         //conversion from digital to analog value (voltage from pin)
         IR_analog_volt = 3.3 / 1024 * IR_volt;
-        IR_distance = compute_dist_from_volt(IR_analog_volt) * 100; // conversion  from pin voltsage to estimated distance in cm
+        IR_distance = compute_dist_from_volt(IR_analog_volt) * 100; // conversion  from pin voltage to estimated distance in cm
         //check for valid or erroneous message from parser
         switch (msg_state) {
             case ERR_MESSAGE:
@@ -422,7 +440,7 @@ int main(void) {
                 break;
             case NEW_MESSAGE:
                 //LATAbits.LATA0 = 1;
-                for (int i = 0; i < 7; i++) {
+                for (int i = 0; i < 6; i++) {
                     out_msg [i] = response_prefix [i];
                 }
                 if (instruction_counter >= 10) {//fifo full, error message and no loading on fifo
@@ -464,26 +482,59 @@ int main(void) {
                 //no action if no message completed from the parser
                 break;
         }
+        
         //data parsing 
         //LATAbits.LATA0 = chars_to_parse;
         //LATAbits.LATA0 = res;
         //process bytes received through UART and check for messages using protocol
-        if (chars_to_parse > 0) {
-            IEC0bits.U1RXIE = 0;
-            chars_to_parse --;
-            IEC0bits.U1RXIE = 1;
-            //upload_char_to_uart_buf(in_buf [in_read_idx], uart_buf);
-            //IFS0bits.U1TXIF = 1;
-            //IEC0bits.U1TXIE = 1;
-            msg_state = parse_byte(&ps, in_buf [in_read_idx]);
-            //LATAbits.LATA0 = parse_byte(&ps, in_buf [in_read_idx]);
-            /*if (msg_state != NO_MESSAGE)
-                LATAbits.LATA0 = 1;
-            */
-            in_read_idx ++;
-            in_read_idx %= rx_buf_size;
-        }
         
+        //a continues flow of numbers sent through the uart does not cause overflow in the current implementation
+        //in the edge-case a buffer overflow occurs we flush all the elements in the reception buffer and in the uart reception register,
+        //send an error message ("$MACK0*") through the uart and reset the parser state to STATE_DOLLAR
+        if (U1STAbits.OERR == 1) {
+            chars_to_parse = 0;
+            ps.state = STATE_DOLLAR;
+            for (int i = 0; i < 7; i++) {
+                out_msg [i] = response_prefix [i];
+            }
+            out_msg [6] = '0';
+            out_msg [7] = '*';
+            out_msg [8] = '\n';
+            out_msg [9] = '\0';
+            if (U1STAbits.TRMT == 0) //if transmisssion still ongoing no need to put characeter in uart buffer to start transmission of new message
+                upload_to_uart_buf(out_msg, uart_buf);
+            else {
+                //if no ongoing transmission needed to start a new one by putting the first character directly in the uart fifo 
+                //to ensure uart tx flag raise from uart module
+                //and the rest of the message in the circular buffer
+                U1TXREG = out_msg [0];
+                upload_to_uart_buf (out_msg + 1, uart_buf);
+            }
+            IEC0bits.U1TXIE = 1;            
+        }
+        else {
+            while (chars_to_parse > 0) {
+                msg_state = parse_byte(&ps, in_buf [in_read_idx]);
+                IEC0bits.U1RXIE = 0;
+                chars_to_parse --;
+                IEC0bits.U1RXIE = 1;
+                in_read_idx ++;
+                in_read_idx %= rx_buf_size;
+                //upload_char_to_uart_buf(in_buf [in_read_idx], uart_buf);
+                //IFS0bits.U1TXIF = 1;
+                //IEC0bits.U1TXIE = 1;
+
+                //LATAbits.LATA0 = parse_byte(&ps, in_buf [in_read_idx]);
+                /*if (msg_state != NO_MESSAGE)
+                    LATAbits.LATA0 = 1;
+                */
+
+            }
+        }
+        if (command_to_pop == 1) {
+            pop_command(&(commands_list [in_read_idx]));
+            command_to_pop = 0;
+        }
         //blinking and execution control
         switch (CONTROL_STATE) {
             case WAIT_FOR_START:
