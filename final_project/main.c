@@ -373,7 +373,7 @@ int main(void) {
     
     int msg_state = NO_MESSAGE;
     
-    char out_msg [16];
+    char out_msg [16]; //string containing the message to transmit through the uart before being loaded on the transmission circular buffer
     char response_prefix [7] = "$MACK,"; //start of acknowledgment message both for correct and wrong message
     int x, t;
     
@@ -466,7 +466,7 @@ int main(void) {
         
         //data parsing 
         
-        //a continues flow of numbers sent through the uart does not cause overflow in the current implementation
+        //a continues flow of numbers sent through the uart does not cause overflow of the reception register in the current implementation
         //in the edge-case a buffer overflow occurs we flush all the elements in the reception buffer and in the uart reception register,
         //send an error message ("$MACK0*") through the uart and reset the parser state to STATE_DOLLAR
         if (U1STAbits.OERR == 1) {
@@ -479,6 +479,8 @@ int main(void) {
             out_msg [7] = '*';
             out_msg [8] = '\n';
             out_msg [9] = '\0';
+            
+            IEC0bits.U1TXIE = 0;
             if (U1STAbits.TRMT == 0) //if transmission still ongoing no need to put character in uart buffer to start transmission of new message
                 upload_to_uart_buf(out_msg, uart_buf);
             else {
@@ -488,7 +490,8 @@ int main(void) {
                 U1TXREG = out_msg [0];
                 upload_to_uart_buf (out_msg + 1, uart_buf);
             }
-            IEC0bits.U1TXIE = 1;            
+            IEC0bits.U1TXIE = 1;  
+            U1STAbits.OERR = 0;
         }
         else {//process bytes received through UART and check for messages using protocol
             while (chars_to_parse > 0) {
